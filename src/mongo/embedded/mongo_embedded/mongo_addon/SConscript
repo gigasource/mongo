@@ -3,7 +3,7 @@ import libdeps
 
 env = env.Clone()
 # This line must contain all paths which have include file
-env.Append(CPPPATH=['/Users/admin/Documents/Huy/mongo-addon/10.15.3/include/node', '/Users/admin/Documents/Huy/build/mongo/src/mongo/embedded/mongo_embedded/mongo_addon/include', '/Users/admin/Documents/Huy/mongo-addon/10.15.3/include/node', '/Users/admin/Documents/Huy/mongo-addon/node_modules/node-addon-api', '/Users/admin/Documents/Huy/mongo-addon/10.15.3/deps/v8/include', '/Users/admin/Documents/Huy/mongo-addon/10.15.3/src'])
+env.Append(CPPPATH=['$BUILD_DIR/mongo/embedded/mongo_embedded/mongo_addon/include/node', '$BUILD_DIR/mongo/embedded/mongo_embedded/mongo_addon/include/node-addon-api'])
 env.Append(LINKFLAGS=['-shared', '-undefined', 'dynamic_lookup'])
 
 env['LIBDEPS_SHLIBEMITTER'] = libdeps.make_libdeps_emitter(

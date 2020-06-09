@@ -3427,7 +3427,7 @@ def doConfigure(myenv):
 
 env = doConfigure( env )
 
-env.Append(CPPDEFINES=['_FILE_OFFSET_BITS=64', '_DARWIN_USE_64_BIT_INODE=1', 'NODE_ENGINE="chakracore"', 'V8_DEPRECATION_WARNINGS=1', 'USING_V8_SHARED=1', 'USING_UV_SHARED=1', 'NODE_ENGINE_CHAKRACORE', '_LARGEFILE_SOURCE', 'BUILDING_NODE_EXTENSION'])
+env.Append(CPPDEFINES=['_DARWIN_USE_64_BIT_INODE=1', 'NODE_ENGINE="chakracore"', 'V8_DEPRECATION_WARNINGS=1', 'USING_V8_SHARED=1', 'USING_UV_SHARED=1', 'NODE_ENGINE_CHAKRACORE', '_LARGEFILE_SOURCE', 'BUILDING_NODE_EXTENSION'])
 #if get_option('install-type') == 'sim':
 #    env.Append(CCFLAGS=['-isysroot', '/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator13.2.sdk', '-Os', '-gdwarf-2', '-mios-simulator-version-min=9.0' ,'-arch', 'x86_64' ,'-Wall' ,'-Wendif-labels' ,'-W' ,'-Wno-unused-parameter' , '-stdlib=libc++' , '-fno-threadsafe-statics' , '-fno-strict-aliasing' , '-MMD'])
 #elif get_option('install-type') == 'real':
