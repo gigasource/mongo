@@ -11,6 +11,8 @@ env['LIBDEPS_SHLIBEMITTER'] = libdeps.make_libdeps_emitter(
     libdeps.dependency_visibility_honored
 )
 
+env.Append(LINKFLAGS=['-Wl,-exported_symbols_list,src/mongo/embedded/mongo_embedded/mongo_addon/libmongo_addon.exported_symbols_list'])
+
 env.Library(
     target='mongo-addon',
     source=[
