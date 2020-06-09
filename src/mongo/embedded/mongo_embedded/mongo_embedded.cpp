@@ -41,17 +41,20 @@
 #include "mongo/db/client.h"
 #include "mongo/db/dbmain.h"
 #include "mongo/db/service_context.h"
+#include "mongo/db/json.h"
 #include "mongo/embedded/embedded.h"
 #include "mongo/embedded/embedded_log_appender.h"
 #include "mongo/logger/logger.h"
 #include "mongo/logger/message_event_utf8_encoder.h"
 #include "mongo/rpc/message.h"
+#include "mongo/rpc/op_msg.h"
 #include "mongo/stdx/unordered_map.h"
 #include "mongo/transport/service_entry_point.h"
 #include "mongo/transport/transport_layer_mock.h"
 #include "mongo/util/assert_util.h"
 #include "mongo/util/scopeguard.h"
 #include "mongo/util/shared_buffer.h"
+#include "mongo/bson/bsonobjbuilder.h"
 
 #if defined(_WIN32)
 #define MONGO_API_CALL __cdecl
@@ -651,3 +654,36 @@ void MONGO_API_CALL mongo_embedded_v1_status_destroy(mongo_embedded_v1_status* c
 }
 
 }  // extern "C"
+
+mongo::Message messageFromBuffer(void* data, size_t dataLen) {
+    auto sb = mongo::SharedBuffer::allocate(dataLen);
+    memcpy(sb.get(), data, dataLen);
+    mongo::Message msg(std::move(sb));
+    return msg;
+}
+
+mongo::BSONObj MONGO_API_CALL performRpc(mongo_embedded_v1_client* client, mongo::OpMsgRequest request, mongo_embedded_v1_status* status) {
+    auto inputMessage = request.serialize();
+
+    // declare the output size and pointer
+    void* output;
+    size_t outputSize;
+
+    // call the wire protocol
+    int err = mongo_embedded_v1_client_invoke(
+        client, inputMessage.buf(), inputMessage.size(), &output, &outputSize, status);
+    // convert the shared buffer to a mongo::message and ensure that it is valid
+    auto outputMessage = messageFromBuffer(output, outputSize);
+    // convert the message into an OpMessage to examine its BSON
+    auto outputOpMsg = mongo::OpMsg::parseOwned(outputMessage);
+    return outputOpMsg.body;
+}
+
+void mongo_embedded_v1_call_invoke(char* const json, size_t, mongo_embedded_v1_client* client, mongo_embedded_v1_status* status, char*& result, int& result_size) {
+    mongo::OpMsgRequest insertOpMsg;
+    insertOpMsg.body = mongo::BSONObj(json);
+    auto outputBSON1 = performRpc(client, insertOpMsg, status);
+    result_size = outputBSON1.objsize();
+    result = new char[result_size + 1];
+    memcpy(result, outputBSON1.objdata(), outputBSON1.objsize());
+}

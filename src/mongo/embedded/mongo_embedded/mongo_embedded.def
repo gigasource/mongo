@@ -12,3 +12,5 @@ EXPORTS
     mongo_embedded_v1_client_create
     mongo_embedded_v1_client_destroy
     mongo_embedded_v1_client_invoke
+    mongo_embedded_v1_call_invoke
+

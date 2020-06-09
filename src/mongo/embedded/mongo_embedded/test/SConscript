@@ -1,0 +1,44 @@
+Import("env")
+import libdeps
+
+simenv = env.Clone()
+
+simenv.Append(CPPPATH=['/Users/admin/Documents/Huy/mongo-addon/10.15.3/include/node', '/Users/admin/Documents/Huy/build/mongo/src/mongo/embedded/mongo_embedded/mongo_addon/include', '/Users/admin/Documents/Huy/mongo-addon/10.15.3/include/node', '/Users/admin/Documents/Huy/mongo-addon/node_modules/node-addon-api', '/Users/admin/Documents/Huy/mongo-addon/10.15.3/deps/v8/include', '/Users/admin/Documents/Huy/mongo-addon/10.15.3/src'])
+
+simenv['LIBDEPS_SHLIBEMITTER'] = libdeps.make_libdeps_emitter(
+    'SharedArchive',
+    libdeps.dependency_visibility_honored
+)
+
+simenv.Append(LINKFLAGS=['-shared', '-undefined', 'dynamic_lookup', '-isysroot', '/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator13.2.sdk'])
+
+simenv.Library(
+    target='hello-sim',
+    source=[
+        'hello.cc'
+    ],
+    INSTALL_ALIAS=[
+        'embedded-hello-sim',
+    ],
+)
+
+realenv = env.Clone()
+
+realenv.Append(CPPPATH=['/Users/admin/Documents/Huy/mongo-addon/10.15.3/include/node', '/Users/admin/Documents/Huy/build/mongo/src/mongo/embedded/mongo_embedded/mongo_addon/include', '/Users/admin/Documents/Huy/mongo-addon/10.15.3/include/node', '/Users/admin/Documents/Huy/mongo-addon/node_modules/node-addon-api', '/Users/admin/Documents/Huy/mongo-addon/10.15.3/deps/v8/include', '/Users/admin/Documents/Huy/mongo-addon/10.15.3/src'])
+
+realenv['LIBDEPS_SHLIBEMITTER'] = libdeps.make_libdeps_emitter(
+    'SharedArchive',
+    libdeps.dependency_visibility_honored
+)
+
+realenv.Append(LINKFLAGS=['-shared', '-undefined', 'dynamic_lookup', '-isysroot', '/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS13.2.sdk', '-arch', 'arm64'])
+
+realenv.Library(
+    target='hello-real',
+    source=[
+        'hello.cc'
+    ],
+    INSTALL_ALIAS=[
+        'embedded-hello-real',
+    ],
+)

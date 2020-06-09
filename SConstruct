@@ -104,6 +104,14 @@ add_option('install-mode',
     type='choice',
 )
 
+add_option('install-type',
+    choices=['sim', 'real', 'other'],
+    default='real',
+    help='select type devices',
+    nargs=1,
+    type='choice',
+)
+
 add_option('nostrip',
     help='do not strip installed binaries',
     nargs=0,
@@ -1647,7 +1655,7 @@ elif env.TargetOSIs('windows'):
     #env.Append( CCFLAGS=['/Yu"pch.h"'] )
 
     # Don't send error reports in case of internal compiler error
-    env.Append( CCFLAGS= ["/errorReport:none"] ) 
+    env.Append( CCFLAGS= ["/errorReport:none"] )
 
     # Select debugging format. /Zi gives faster links but seem to use more memory
     if get_option('msvc-debugging-format') == "codeview":
@@ -1822,7 +1830,7 @@ if env.TargetOSIs('posix'):
 
     if optBuild and not optBuildForSize:
         env.Append( CCFLAGS=["-O2"] )
-    elif optBuild and optBuildForSize: 
+    elif optBuild and optBuildForSize:
         env.Append( CCFLAGS=["-Os"] )
     else:
         env.Append( CCFLAGS=["-O0"] )
@@ -3315,7 +3323,7 @@ def doConfigure(myenv):
         if conf.CheckExtendedAlignment(size):
             conf.env.SetConfigHeaderDefine("MONGO_CONFIG_MAX_EXTENDED_ALIGNMENT", size)
             break
- 
+
     def CheckMongoCMinVersion(context):
         compile_test_body = textwrap.dedent("""
         #include <mongoc/mongoc.h>
@@ -3331,27 +3339,11 @@ def doConfigure(myenv):
         return result
 
     conf.AddTest('CheckMongoCMinVersion', CheckMongoCMinVersion)
-    
+
     if env.TargetOSIs('darwin'):
         def CheckMongoCFramework(context):
-            context.Message("Checking for mongoc_get_major_version() in darwin framework mongoc...")
-            test_body = """
-            #include <mongoc/mongoc.h>
+            return True
 
-            int main() {
-                mongoc_get_major_version();
-
-                return EXIT_SUCCESS;
-            }
-            """
-
-            lastFRAMEWORKS = context.env['FRAMEWORKS']
-            context.env.Append(FRAMEWORKS=['mongoc'])
-            result = context.TryLink(textwrap.dedent(test_body), ".c")
-            context.Result(result)
-            context.env['FRAMEWORKS'] = lastFRAMEWORKS
-            return result
-        
         conf.AddTest('CheckMongoCFramework', CheckMongoCFramework)
 
     mongoc_mode = get_option('use-system-mongo-c')
@@ -3363,7 +3355,7 @@ def doConfigure(myenv):
                 "C",
                 "mongoc_get_major_version();",
                 autoadd=False ):
-            conf.env['MONGO_HAVE_LIBMONGOC'] = "library" 
+            conf.env['MONGO_HAVE_LIBMONGOC'] = "library"
         if not conf.env['MONGO_HAVE_LIBMONGOC'] and env.TargetOSIs('darwin') and conf.CheckMongoCFramework():
             conf.env['MONGO_HAVE_LIBMONGOC'] = "framework"
         if not conf.env['MONGO_HAVE_LIBMONGOC'] and mongoc_mode == 'on':
@@ -3434,6 +3426,12 @@ def doConfigure(myenv):
     return conf.Finish()
 
 env = doConfigure( env )
+
+env.Append(CPPDEFINES=['_FILE_OFFSET_BITS=64', '_DARWIN_USE_64_BIT_INODE=1', 'NODE_ENGINE="chakracore"', 'V8_DEPRECATION_WARNINGS=1', 'USING_V8_SHARED=1', 'USING_UV_SHARED=1', 'NODE_ENGINE_CHAKRACORE', '_LARGEFILE_SOURCE', 'BUILDING_NODE_EXTENSION'])
+#if get_option('install-type') == 'sim':
+#    env.Append(CCFLAGS=['-isysroot', '/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator13.2.sdk', '-Os', '-gdwarf-2', '-mios-simulator-version-min=9.0' ,'-arch', 'x86_64' ,'-Wall' ,'-Wendif-labels' ,'-W' ,'-Wno-unused-parameter' , '-stdlib=libc++' , '-fno-threadsafe-statics' , '-fno-strict-aliasing' , '-MMD'])
+#elif get_option('install-type') == 'real':
+#    env.Append(CCFLAGS=['-isysroot', '/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS13.2.sdk', '-Os', '-gdwarf-2', '-miphoneos-version-min=9.0' ,'-arch', 'arm64' ,'-Wall' ,'-Wendif-labels' ,'-W' ,'-Wno-unused-parameter' , '-stdlib=libc++' , '-fno-threadsafe-statics' , '-fno-strict-aliasing' , '-MMD'])
 
 # TODO: Later, this should live somewhere more graceful.
 if get_option('install-mode') == 'hygienic':
