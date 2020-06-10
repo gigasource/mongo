@@ -14,8 +14,8 @@ env['LIBDEPS_SHLIBEMITTER'] = libdeps.make_libdeps_emitter(
 if (env.TargetOSIs('android')):
     env.Append(LINKFLAGS=['-Wl,--warn-unresolved-symbols'])
     env.Append(LINKFLAGS=['-fPIE'])
-
-env.Append(LINKFLAGS=['-Wl,-exported_symbols_list,src/mongo/embedded/mongo_embedded/mongo_addon/libmongo_addon.exported_symbols_list'])
+else:
+    env.Append(LINKFLAGS=['-Wl,-exported_symbols_list,src/mongo/embedded/mongo_embedded/mongo_addon/libmongo_addon.exported_symbols_list'])
 
 env.Library(
     target='mongo-addon',
