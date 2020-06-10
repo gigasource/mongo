@@ -20,8 +20,6 @@ function run_macosx {
   fi
 }
 
-func
-
 case $TARGET in
   macosx)
     run_macosx
