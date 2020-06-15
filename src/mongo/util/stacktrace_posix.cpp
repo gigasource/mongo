@@ -369,7 +369,7 @@ void processLoadSegment(const dl_phdr_info& info, const ElfW(Phdr) & phdr, BSONO
 #elif defined(__arm__)
 #define ARCH_BITS 32
 #else
-#error Unknown target architecture.
+#define ARCH_BITS 32
 #endif  //__aarch64__
 #endif  //__ELF_NATIVE_CLASS
 
