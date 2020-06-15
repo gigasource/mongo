@@ -6,6 +6,7 @@ env = env.Clone()
 env.Append(CPPPATH=['$BUILD_DIR/mongo/embedded/mongo_embedded/mongo_addon/include/node', '$BUILD_DIR/mongo/embedded/mongo_embedded/mongo_addon/include', '$BUILD_DIR/mongo/embedded/mongo_embedded/mongo_addon/include/node-addon-api'])
 env.Append(LINKFLAGS=['-shared', '-undefined', 'dynamic_lookup'])
 
+
 env['LIBDEPS_SHLIBEMITTER'] = libdeps.make_libdeps_emitter(
     'SharedArchive',
     libdeps.dependency_visibility_honored
@@ -16,6 +17,8 @@ if (env.TargetOSIs('android')):
     env.Append(LINKFLAGS=['-fPIE'])
 else:
     env.Append(LINKFLAGS=['-Wl,-exported_symbols_list,src/mongo/embedded/mongo_embedded/mongo_addon/libmongo_addon.exported_symbols_list'])
+    env.Append(LIBS=['node'])
+    env.Append(LIBPATH='$BUILD_DIR/mongo/embedded/mongo_embedded/mongo_addon/bin')
 
 env.Library(
     target='mongo-addon',
