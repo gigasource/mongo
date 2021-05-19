@@ -11,7 +11,7 @@ env['LIBDEPS_SHLIBEMITTER'] = libdeps.make_libdeps_emitter(
     'SharedArchive',
     libdeps.dependency_visibility_honored
 )
-
+# iOS has undefined lookup flag so no need to link it with libnode but android has to be linked with libnode
 if (env.TargetOSIs('android')):
     env.Append(LINKFLAGS=['-Wl,--warn-unresolved-symbols'])
     env.Append(LINKFLAGS=['-fPIE'])
