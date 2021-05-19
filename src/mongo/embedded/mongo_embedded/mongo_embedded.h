@@ -31,6 +31,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <string>
 
 #pragma push_macro("MONGO_API_CALL")
 #undef MONGO_API_CALL
@@ -739,6 +740,9 @@ mongo_embedded_v1_client_invoke(mongo_embedded_v1_client* client,
 
 #ifdef __cplusplus
 }  // extern "C"
+
+MONGO_EMBEDDED_API void MONGO_API_CALL
+mongo_embedded_v1_call_invoke(char* const json, size_t, mongo_embedded_v1_client* client, mongo_embedded_v1_status* status, char*& result, int& result_size);
 #endif
 
 #ifdef _DOXYGEN
