@@ -16,7 +16,7 @@ function run_macosx {
   if [[ "$OSTYPE" != "darwin"* ]]; then
     echo "Must run on macosx"
   else
-    ./buildscripts/scons.py --link-model=dynamic-sdk --install-mode=hygienic --disable-warnings-as-errors --enable-free-mon=off --js-engine=none --dbg=off --opt=size --wiredtiger=off --use-system-mongo-c=off --allocator=system --lto install-embedded-addon -j$J MONGO_VERSION=4.0.4
+    ./buildscripts/scons.py --link-model=dynamic-sdk --install-mode=hygienic --disable-warnings-as-errors --enable-free-mon=off --js-engine=none --dbg=off --opt=size --wiredtiger=off --use-system-mongo-c=off --allocator=system --lto install-embedded-addon -j$J MONGO_VERSION=4.3.3
   fi
 }
 

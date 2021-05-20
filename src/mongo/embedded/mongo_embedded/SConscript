@@ -87,8 +87,7 @@ yamlEnv.InjectThirdParty(libraries=['yaml'])
 
 env.SConscript(
     dirs=[
-        'mongo_addon',
-        'test'
+        'mongo_addon'
     ],
     exports={
         'env': yamlEnv

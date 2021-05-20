@@ -34,7 +34,5 @@ env.Library(
     LIBDEPS=[
         '$BUILD_DIR/mongo/embedded/mongo_embedded/mongo_embedded'
     ],
-    INSTALL_ALIAS=[
-        'embedded-addon',
-    ],
+    AIB_COMPONENT="embedded-addon"
 )

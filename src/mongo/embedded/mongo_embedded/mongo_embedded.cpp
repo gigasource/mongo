@@ -96,6 +96,7 @@ static MongoEmbeddedStatusImpl translateException(
  * copy that may allocate memory.
  */
 static void translateExceptionFallback(MongoEmbeddedStatusImpl& status) noexcept {
+    puts("ABCDASD");
     status.error = MONGO_EMBEDDED_V1_ERROR_IN_REPORTING_ERROR;
     status.exception_code = -1;
     setErrorMessageNoAlloc(status.what);
@@ -162,6 +163,7 @@ struct mongo_embedded_v1_instance {
           serviceContext(::mongo::embedded::initialize(yaml_config)),
           // creating mock transport layer to be able to create sessions
           transportLayer(std::make_unique<mongo::transport::TransportLayerMock>()) {
+        puts("SHIT");
         if (!this->serviceContext) {
             throw ::mongo::MobileException{
                 MONGO_EMBEDDED_V1_ERROR_DB_INITIALIZATION_FAILED,
