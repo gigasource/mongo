@@ -1,0 +1,38 @@
+Import("env")
+import libdeps
+
+env = env.Clone()
+# This line must contain all paths which have include file
+env.Append(CPPPATH=['$BUILD_DIR/mongo/embedded/mongo_embedded/mongo_addon/include/node', '$BUILD_DIR/mongo/embedded/mongo_embedded/mongo_addon/include', '$BUILD_DIR/mongo/embedded/mongo_embedded/mongo_addon/include/node-addon-api'])
+env.Append(LINKFLAGS=['-shared', '-undefined', 'dynamic_lookup'])
+
+
+env['LIBDEPS_SHLIBEMITTER'] = libdeps.make_libdeps_emitter(
+    'SharedArchive',
+    libdeps.dependency_visibility_honored
+)
+# iOS has undefined lookup flag so no need to link it with libnode but android has to be linked with libnode
+if (env.TargetOSIs('android')):
+    env.Append(LINKFLAGS=['-Wl,--warn-unresolved-symbols'])
+    env.Append(LINKFLAGS=['-fPIE'])
+    env.Append(LIBS=['node'])
+    env.Append(LIBPATH=['$BUILD_DIR/mongo/embedded/mongo_embedded/mongo_addon/bin/x86', '$BUILD_DIR/mongo/embedded/mongo_embedded/mongo_addon/bin/x86_64', '$BUILD_DIR/mongo/embedded/mongo_embedded/mongo_addon/bin/armeabi-v7a', '$BUILD_DIR/mongo/embedded/mongo_embedded/mongo_addon/bin/arm64-v8a'])
+else:
+    env.Append(LINKFLAGS=['-Wl,-exported_symbols_list,src/mongo/embedded/mongo_embedded/mongo_addon/libmongo_addon.exported_symbols_list'])
+
+env.Library(
+    target='mongo-addon',
+    source=[
+        'mongo-addon.cc',
+        'mongo-client.cc',
+        'mongo-instance.cc',
+        'mongo-lib.cc',
+        'mongo-params.cc',
+        'mongo-status.cc',
+        'wrapper.cc'
+    ],
+    LIBDEPS=[
+        '$BUILD_DIR/mongo/embedded/mongo_embedded/mongo_embedded'
+    ],
+    AIB_COMPONENT="embedded-addon"
+)
