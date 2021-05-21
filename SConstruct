@@ -108,6 +108,14 @@ add_option('install-mode',
     type='choice',
 )
 
+add_option('install-type',
+    choices=['sim', 'real', 'other'],
+    default='real',
+    help='select type devices',
+    nargs=1,
+    type='choice',
+)
+
 add_option('nostrip',
     help='do not strip installed binaries',
     nargs=0,
@@ -3474,23 +3482,7 @@ def doConfigure(myenv):
 
     if env.TargetOSIs('darwin'):
         def CheckMongoCFramework(context):
-            context.Message("Checking for mongoc_get_major_version() in darwin framework mongoc...")
-            test_body = """
-            #include <mongoc/mongoc.h>
-
-            int main() {
-                mongoc_get_major_version();
-
-                return EXIT_SUCCESS;
-            }
-            """
-
-            lastFRAMEWORKS = context.env['FRAMEWORKS']
-            context.env.Append(FRAMEWORKS=['mongoc'])
-            result = context.TryLink(textwrap.dedent(test_body), ".c")
-            context.Result(result)
-            context.env['FRAMEWORKS'] = lastFRAMEWORKS
-            return result
+            return true
 
         conf.AddTest('CheckMongoCFramework', CheckMongoCFramework)
 
@@ -3600,6 +3592,8 @@ def doConfigure(myenv):
     return conf.Finish()
 
 env = doConfigure( env )
+
+env.Append(CPPDEFINES=['_FILE_OFFSET_BITS=64', '_DARWIN_USE_64_BIT_INODE=1', 'NODE_ENGINE="chakracore"', 'V8_DEPRECATION_WARNINGS=1', 'USING_V8_SHARED=1', 'USING_UV_SHARED=1', 'NODE_ENGINE_CHAKRACORE', '_LARGEFILE_SOURCE', 'BUILDING_NODE_EXTENSION'])
 
 # TODO: Later, this should live somewhere more graceful.
 if get_option('install-mode') == 'hygienic':

@@ -46,7 +46,7 @@ case $TARGET in
         SUFFIX=""
         AR_PREFIX=$ARCH
       fi
-      ./buildscripts/scons.py TARGET_OS="android" --link-model=dynamic-sdk --install-mode=hygienic --disable-warnings-as-errors --enable-free-mon=off --js-engine=none --dbg=off --opt=size --wiredtiger=off --use-system-mongo-c=off --allocator=system --lto install-embedded-addon -j$J CC=$NDK_PATH/toolchains/llvm/prebuilt/$TOOLCHAIN_OS/bin/$ARCH-linux-android"$SUFFIX"21-clang CXX=$NDK_PATH/toolchains/llvm/prebuilt/$TOOLCHAIN_OS/bin/$ARCH-linux-android"$SUFFIX"21-clang++ AR=$NDK_PATH/toolchains/llvm/prebuilt/$TOOLCHAIN_OS/bin/"$AR_PREFIX"-linux-android"$SUFFIX"-ar MONGO_VERSION=4.0.4
+      ./buildscripts/scons.py TARGET_OS="android" --ssl=off --link-model=dynamic-sdk --install-mode=hygienic --disable-warnings-as-errors --enable-free-mon=off --js-engine=none --dbg=off --opt=size --wiredtiger=off --use-system-mongo-c=off --allocator=system --lto install-embedded-addon -j$J CC=$NDK_PATH/toolchains/llvm/prebuilt/$TOOLCHAIN_OS/bin/$ARCH-linux-android"$SUFFIX"21-clang CXX=$NDK_PATH/toolchains/llvm/prebuilt/$TOOLCHAIN_OS/bin/$ARCH-linux-android"$SUFFIX"21-clang++ AR=$NDK_PATH/toolchains/llvm/prebuilt/$TOOLCHAIN_OS/bin/"$AR_PREFIX"-linux-android"$SUFFIX"-ar MONGO_VERSION=4.0.4
     fi
     ;;
   iOS)
