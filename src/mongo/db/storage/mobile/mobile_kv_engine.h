@@ -35,7 +35,7 @@
 #include "mongo/db/storage/kv/kv_engine.h"
 #include "mongo/db/storage/mobile/mobile_options.h"
 #include "mongo/db/storage/mobile/mobile_session_pool.h"
-#include "mongo/stdx/mutex.h"
+#include "mongo/platform/mutex.h"
 #include "mongo/util/periodic_runner.h"
 #include "mongo/util/string_map.h"
 
@@ -65,12 +65,12 @@ public:
                                                           StringData ident) override;
 
     Status createSortedDataInterface(OperationContext* opCtx,
+                                     const CollectionOptions& collOptions,
                                      StringData ident,
                                      const IndexDescriptor* desc) override;
 
-    SortedDataInterface* getSortedDataInterface(OperationContext* opCtx,
-                                                StringData ident,
-                                                const IndexDescriptor* desc) override;
+    std::unique_ptr<SortedDataInterface> getSortedDataInterface(
+        OperationContext* opCtx, StringData ident, const IndexDescriptor* desc) override;
 
     Status beginBackup(OperationContext* opCtx) override {
         return Status::OK();
@@ -78,7 +78,7 @@ public:
 
     void endBackup(OperationContext* opCtx) override {}
 
-    Status dropIdent(OperationContext* opCtx, StringData ident) override;
+    Status dropIdent(OperationContext* opCtx, RecoveryUnit* ru, StringData ident) override;
 
     bool supportsDocLocking() const override {
         return false;
@@ -124,11 +124,11 @@ public:
     std::vector<std::string> getAllIdents(OperationContext* opCtx) const override;
 
     void setJournalListener(JournalListener* jl) override {
-        stdx::unique_lock<stdx::mutex> lk(_mutex);
+        stdx::unique_lock<Latch> lk(_mutex);
         _journalListener = jl;
     }
 
-    virtual Timestamp getAllCommittedTimestamp() const override {
+    virtual Timestamp getAllDurableTimestamp() const override {
         MONGO_UNREACHABLE;
     }
 
@@ -143,7 +143,7 @@ public:
 private:
     void maybeVacuum(Client* client, Date_t deadline);
 
-    mutable stdx::mutex _mutex;
+    mutable Mutex _mutex = MONGO_MAKE_LATCH("MobileKVEngine::_mutex");
     void _initDBPath(const std::string& path);
     std::int32_t _setSQLitePragma(const std::string& pragma, sqlite3* session);
 
@@ -155,7 +155,7 @@ private:
     std::string _path;
     embedded::MobileOptions _options;
 
-    std::unique_ptr<PeriodicRunner::PeriodicJobHandle> _vacuumJob;
+    PeriodicJobAnchor _vacuumJob;
 };
 
 }  // namespace mongo

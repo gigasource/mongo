@@ -46,55 +46,32 @@ namespace {
 using std::shared_ptr;
 using std::string;
 using std::vector;
-
-// BTree stuff
-
-bool hasFieldNames(const BSONObj& obj) {
-    BSONForEach(e, obj) {
-        if (e.fieldName()[0])
-            return true;
-    }
-    return false;
-}
-
-BSONObj stripFieldNames(const BSONObj& query) {
-    if (!hasFieldNames(query))
-        return query;
-
-    BSONObjBuilder bb;
-    BSONForEach(e, query) {
-        bb.appendAs(e, StringData());
-    }
-    return bb.obj();
-}
-
 }  // namespace
 
 MobileIndex::MobileIndex(OperationContext* opCtx,
                          const IndexDescriptor* desc,
                          const std::string& ident)
-    : _isUnique(desc->unique()),
+    : SortedDataInterface(KeyString::Version::kLatestVersion, Ordering::make(desc->keyPattern())),
+      _isUnique(desc->unique()),
       _ordering(Ordering::make(desc->keyPattern())),
       _ident(ident),
       _collectionNamespace(desc->parentNS()),
       _indexName(desc->indexName()),
       _keyPattern(desc->keyPattern()) {}
 
-StatusWith<SpecialFormatInserted> MobileIndex::insert(OperationContext* opCtx,
-                                                      const BSONObj& key,
-                                                      const RecordId& recId,
-                                                      bool dupsAllowed) {
-    invariant(recId.isValid());
-    invariant(!hasFieldNames(key));
-
-    return _insert(opCtx, key, recId, dupsAllowed);
+Status MobileIndex::insert(OperationContext* opCtx,
+                           const KeyString::Value& keyString,
+                           bool dupsAllowed) {
+    return _insert(opCtx, keyString, dupsAllowed);
 }
 
 template <typename ValueType>
-StatusWith<SpecialFormatInserted> MobileIndex::doInsert(OperationContext* opCtx,
-                                                        const KeyString& key,
-                                                        const ValueType& value,
-                                                        bool isTransactional) {
+Status MobileIndex::doInsert(OperationContext* opCtx,
+                             const char* keyBuffer,
+                             size_t keySize,
+                             const KeyString::TypeBits& typeBits,
+                             const ValueType& value,
+                             bool isTransactional) {
     MobileSession* session;
     if (isTransactional) {
         session = MobileRecoveryUnit::get(opCtx)->getSession(opCtx, false);
@@ -105,7 +82,7 @@ StatusWith<SpecialFormatInserted> MobileIndex::doInsert(OperationContext* opCtx,
     SqliteStatement insertStmt(
         *session, "INSERT INTO \"", _ident, "\" (key, value) VALUES (?, ?);");
 
-    insertStmt.bindBlob(0, key.getBuffer(), key.getSize());
+    insertStmt.bindBlob(0, keyBuffer, keySize);
     insertStmt.bindBlob(1, value.getBuffer(), value.getSize());
 
     int status = insertStmt.step();
@@ -113,42 +90,36 @@ StatusWith<SpecialFormatInserted> MobileIndex::doInsert(OperationContext* opCtx,
         insertStmt.setExceptionStatus(status);
         if (isUnique()) {
             // Return error if duplicate key inserted in a unique index.
-            BSONObj bson =
-                KeyString::toBson(key.getBuffer(), key.getSize(), _ordering, key.getTypeBits());
+            BSONObj bson = KeyString::toBson(keyBuffer, keySize, _ordering, typeBits);
             return buildDupKeyErrorStatus(bson, _collectionNamespace, _indexName, _keyPattern);
         } else {
             // A record with same key could already be present in a standard index, that is OK. This
             // can happen when building a background index while documents are being written in
             // parallel.
-            return StatusWith<SpecialFormatInserted>(
-                SpecialFormatInserted::NoSpecialFormatInserted);
+            return Status::OK();
         }
     }
     embedded::checkStatus(status, SQLITE_DONE, "sqlite3_step");
 
-    if (key.getTypeBits().isLongEncoding())
-        return StatusWith<SpecialFormatInserted>(SpecialFormatInserted::LongTypeBitsInserted);
-
-    return StatusWith<SpecialFormatInserted>(SpecialFormatInserted::NoSpecialFormatInserted);
+    return Status::OK();
 }
 
 void MobileIndex::unindex(OperationContext* opCtx,
-                          const BSONObj& key,
-                          const RecordId& recId,
+                          const KeyString::Value& keyString,
                           bool dupsAllowed) {
-    invariant(recId.isValid());
-    invariant(!hasFieldNames(key));
-
-    return _unindex(opCtx, key, recId, dupsAllowed);
+    _unindex(opCtx, keyString, dupsAllowed);
 }
 
-void MobileIndex::_doDelete(OperationContext* opCtx, const KeyString& key, KeyString* value) {
+void MobileIndex::_doDelete(OperationContext* opCtx,
+                            const char* keyBuffer,
+                            size_t keySize,
+                            KeyString::Builder* value) {
     MobileSession* session = MobileRecoveryUnit::get(opCtx)->getSession(opCtx, false);
 
     SqliteStatement deleteStmt(
         *session, "DELETE FROM \"", _ident, "\" WHERE key = ?", value ? " AND value = ?" : "", ";");
 
-    deleteStmt.bindBlob(0, key.getBuffer(), key.getSize());
+    deleteStmt.bindBlob(0, keyBuffer, keySize);
     if (value) {
         deleteStmt.bindBlob(1, value->getBuffer(), value->getSize());
     }
@@ -234,22 +205,21 @@ Status MobileIndex::create(OperationContext* opCtx, const std::string& ident) {
     return Status::OK();
 }
 
-Status MobileIndex::dupKeyCheck(OperationContext* opCtx, const BSONObj& key) {
-    invariant(!hasFieldNames(key));
+Status MobileIndex::dupKeyCheck(OperationContext* opCtx, const KeyString::Value& key) {
     invariant(_isUnique);
 
     if (_isDup(opCtx, key))
-        return buildDupKeyErrorStatus(key, _collectionNamespace, _indexName, _keyPattern);
+        return buildDupKeyErrorStatus(
+            key, _collectionNamespace, _indexName, _keyPattern, _ordering);
     return Status::OK();
 }
 
-bool MobileIndex::_isDup(OperationContext* opCtx, const BSONObj& key) {
+bool MobileIndex::_isDup(OperationContext* opCtx, const KeyString::Value& key) {
     MobileSession* session = MobileRecoveryUnit::get(opCtx)->getSession(opCtx);
 
     SqliteStatement dupCheckStmt(*session, "SELECT COUNT(*) FROM \"", _ident, "\" WHERE key = ?;");
 
-    KeyString keyStr(_keyStringVersion, key, _ordering);
-    dupCheckStmt.bindBlob(0, keyStr.getBuffer(), keyStr.getSize());
+    dupCheckStmt.bindBlob(0, key.getBuffer(), key.getSize());
 
     dupCheckStmt.step(SQLITE_ROW);
     long long records = dupCheckStmt.getColInt(0);
@@ -266,6 +236,7 @@ public:
                     const BSONObj& keyPattern)
         : _index(index),
           _opCtx(opCtx),
+          _lastKeyString(index->getKeyStringVersion()),
           _dupsAllowed(dupsAllowed),
           _collectionNamespace(collectionNamespace),
           _indexName(indexName),
@@ -273,45 +244,40 @@ public:
 
     virtual ~BulkBuilderBase() {}
 
-    StatusWith<SpecialFormatInserted> addKey(const BSONObj& key, const RecordId& recId) override {
-        invariant(recId.isValid());
-        invariant(!hasFieldNames(key));
-
-        Status status = _checkNextKey(key);
+    Status addKey(const KeyString::Value& keyString) override {
+        Status status = _checkNextKey(keyString);
         if (!status.isOK()) {
             return status;
         }
 
-        _lastKey = key.getOwned();
+        _lastKeyString.resetFromBuffer(keyString.getBuffer(), keyString.getSize());
 
-        return _addKey(key, recId);
+        return _addKey(keyString);
     }
 
-    SpecialFormatInserted commit(bool mayInterrupt) override {
-        return SpecialFormatInserted::NoSpecialFormatInserted;
-    }
+    void commit(bool mayInterrupt) override {}
 
 protected:
     /**
      * Checks whether the new key to be inserted is > or >= the previous one depending
      * on _dupsAllowed.
      */
-    Status _checkNextKey(const BSONObj& key) {
-        const int cmp = key.woCompare(_lastKey, _index->getOrdering());
+    Status _checkNextKey(const KeyString::Value& keyString) {
+        const int cmp = _lastKeyString.compare(keyString);
         if (!_dupsAllowed && cmp == 0) {
+            auto key = KeyString::toBson(keyString, _index->getOrdering());
             return buildDupKeyErrorStatus(key, _collectionNamespace, _indexName, _keyPattern);
-        } else if (cmp < 0) {
+        } else if (cmp > 0) {
             return Status(ErrorCodes::InternalError, "expected higher RecordId in bulk builder");
         }
         return Status::OK();
     }
 
-    virtual StatusWith<SpecialFormatInserted> _addKey(const BSONObj& key,
-                                                      const RecordId& recId) = 0;
+    virtual Status _addKey(const KeyString::Value& keyString) = 0;
 
     MobileIndex* _index;
     OperationContext* const _opCtx;
-    BSONObj _lastKey;
+    KeyString::Builder _lastKeyString;
     const bool _dupsAllowed;
     const NamespaceString _collectionNamespace;
     const std::string _indexName;
@@ -332,10 +298,10 @@ public:
         : BulkBuilderBase(index, opCtx, dupsAllowed, collectionNamespace, indexName, keyPattern) {}
 
 protected:
-    StatusWith<SpecialFormatInserted> _addKey(const BSONObj& key, const RecordId& recId) override {
-        KeyString keyStr(_index->getKeyStringVersion(), key, _index->getOrdering(), recId);
-        KeyString::TypeBits value = keyStr.getTypeBits();
-        return _index->doInsert(_opCtx, keyStr, value, false);
+    Status _addKey(const KeyString::Value& keyString) override {
+        KeyString::TypeBits typeBits = keyString.getTypeBits();
+        return _index->doInsert(
+            _opCtx, keyString.getBuffer(), keyString.getSize(), typeBits, typeBits, false);
     }
 };
 
@@ -356,16 +322,24 @@ public:
     }
 
 protected:
-    StatusWith<SpecialFormatInserted> _addKey(const BSONObj& key, const RecordId& recId) override {
-        const KeyString keyStr(_index->getKeyStringVersion(), key, _index->getOrdering());
+    Status _addKey(const KeyString::Value& keyString) override {
+        RecordId recId = KeyString::decodeRecordIdAtEnd(keyString.getBuffer(), keyString.getSize());
+        invariant(recId.isValid());
 
-        KeyString value(_index->getKeyStringVersion(), recId);
-        KeyString::TypeBits typeBits = keyStr.getTypeBits();
+        KeyString::Builder value(_index->getKeyStringVersion(), recId);
+        KeyString::TypeBits typeBits = keyString.getTypeBits();
         if (!typeBits.isAllZeros()) {
             value.appendTypeBits(typeBits);
         }
+        auto sizeWithoutRecordId =
+            KeyString::sizeWithoutRecordIdAtEnd(keyString.getBuffer(), keyString.getSize());
 
-        return _index->doInsert(_opCtx, keyStr, value, false);
+        return _index->doInsert(_opCtx,
+                                keyString.getBuffer(),
+                                sizeWithoutRecordId,
+                                keyString.getTypeBits(),
+                                value,
+                                false);
     }
 };
 
@@ -386,27 +360,33 @@ public:
           _startPosition(index.getKeyStringVersion()) {
         MobileSession* session = MobileRecoveryUnit::get(opCtx)->getSession(opCtx);
 
-        _stmt = stdx::make_unique<SqliteStatement>(*session,
-                                                   "SELECT key, value FROM \"",
-                                                   _index.getIdent(),
-                                                   "\" WHERE key ",
-                                                   (_isForward ? ">=" : "<="),
-                                                   " ? ORDER BY key ",
-                                                   (_isForward ? "ASC" : "DESC"),
-                                                   ";");
+        _stmt = std::make_unique<SqliteStatement>(*session,
+                                                  "SELECT key, value FROM \"",
+                                                  _index.getIdent(),
+                                                  "\" WHERE key ",
+                                                  (_isForward ? ">=" : "<="),
+                                                  " ? ORDER BY key ",
+                                                  (_isForward ? "ASC" : "DESC"),
+                                                  ";");
     }
 
     virtual ~CursorBase() {}
 
     boost::optional<IndexKeyEntry> next(RequestedInfo parts) override {
+        if (!_advanceNext()) {
+            return {};
+        }
+        return getCurrentEntry(parts);
+    }
+
+    boost::optional<KeyStringEntry> nextKeyString() override {
+        if (!_advanceNext()) {
+            return {};
+        }
         if (_isEOF) {
             return {};
         }
-
-        _advance();
-        _updatePosition();
-
-        return getCurrentEntry(parts);
+        return _getKeyStringEntry();
     }
 
     void setEndPosition(const BSONObj& key, bool inclusive) override {
@@ -418,40 +398,77 @@ public:
 
         // This uses the opposite rules as a normal seek because a forward scan should end after the
         // key if inclusive and before if exclusive.
-        const auto discriminator =
-            _isForward == inclusive ? KeyString::kExclusiveAfter : KeyString::kExclusiveBefore;
-        _endPosition = stdx::make_unique<KeyString>(_index.getKeyStringVersion());
-        _endPosition->resetToKey(stripFieldNames(key), _index.getOrdering(), discriminator);
+        const auto discriminator = _isForward == inclusive
+            ? KeyString::Discriminator::kExclusiveAfter
+            : KeyString::Discriminator::kExclusiveBefore;
+        _endPosition = std::make_unique<KeyString::Builder>(_index.getKeyStringVersion());
+        _endPosition->resetToKey(
+            BSONObj::stripFieldNames(key), _index.getOrdering(), discriminator);
     }
 
-    boost::optional<IndexKeyEntry> seek(const BSONObj& key,
-                                        bool inclusive,
+    boost::optional<IndexKeyEntry> seek(const KeyString::Value& keyString,
                                         RequestedInfo parts) override {
-        const BSONObj startKey = stripFieldNames(key);
-        // By using a discriminator other than kInclusive, there is no need to distinguish
-        // unique vs non-unique key formats since both start with the key.
-        const auto discriminator =
-            _isForward == inclusive ? KeyString::kExclusiveBefore : KeyString::kExclusiveAfter;
-        _startPosition.resetToKey(startKey, _index.getOrdering(), discriminator);
-
-        _doSeek();
-        _updatePosition();
-
+        seekForKeyString(keyString);
+        if (_isEOF) {
+            return {};
+        }
         return getCurrentEntry(parts);
     }
 
-    boost::optional<IndexKeyEntry> seek(const IndexSeekPoint& seekPoint,
-                                        RequestedInfo parts) override {
-        BSONObj startKey = IndexEntryComparison::makeQueryObject(seekPoint, _isForward);
-
-        const auto discriminator =
-            _isForward ? KeyString::kExclusiveBefore : KeyString::kExclusiveAfter;
-        _startPosition.resetToKey(startKey, _index.getOrdering(), discriminator);
-
+    boost::optional<KeyStringEntry> seekForKeyString(
+        const KeyString::Value& keyStringValue) override {
+        _startPosition.resetFromBuffer(keyStringValue.getBuffer(), keyStringValue.getSize());
         _doSeek();
         _updatePosition();
+        if (_isEOF) {
+            return {};
+        }
+        return _getKeyStringEntry();
+    }
 
-        return getCurrentEntry(parts);
+    boost::optional<IndexKeyEntry> seekExact(const KeyString::Value& keyStringValue,
+                                             RequestedInfo parts) override {
+        auto ksEntry = seekExactForKeyString(keyStringValue);
+        if (ksEntry) {
+            auto kv = getCurrentEntry(parts);
+            invariant(kv);
+            return kv;
+        }
+        return {};
+    }
+
+    boost::optional<KeyStringEntry> seekExactForKeyString(
+        const KeyString::Value& keyStringValue) override {
+        auto ksEntry = [&]() {
+            if (_isForward) {
+                return seekForKeyString(keyStringValue);
+            }
+
+            // Append a kExclusiveAfter discriminator if it's a reverse cursor to ensure that the
+            // KeyString we construct will always be greater than the KeyString that we retrieve
+            // (even when it has a RecordId).
+            KeyString::Builder keyCopy(_index.getKeyStringVersion(), _index.getOrdering());
+
+            // Reset by copying all but the last byte, the kEnd byte.
+            keyCopy.resetFromBuffer(keyStringValue.getBuffer(), keyStringValue.getSize() - 1);
+
+            // Append a different discriminator and new end byte.
+            keyCopy.appendDiscriminator(KeyString::Discriminator::kExclusiveAfter);
+            return seekForKeyString(keyCopy.getValueCopy());
+        }();
+
+        if (!ksEntry) {
+            return {};
+        }
+
+        if (KeyString::compare(ksEntry->keyString.getBuffer(),
+                               keyStringValue.getBuffer(),
+                               KeyString::sizeWithoutRecordIdAtEnd(ksEntry->keyString.getBuffer(),
+                                                                   ksEntry->keyString.getSize()),
+                               keyStringValue.getSize()) == 0) {
+            return KeyStringEntry(ksEntry->keyString, ksEntry->loc);
+        }
+        return {};
     }
 
     // All work is done in restore().
@@ -494,6 +511,34 @@ public:
     }
 
 protected:
+    bool _advanceNext() {
+        if (_isEOF) {
+            return false;
+        }
+
+        _advance();
+        _updatePosition();
+        return true;
+    }
+
+    KeyStringEntry _getKeyStringEntry() {
+        auto sizeWithoutRecordId = KeyString::getKeySize(_savedKey.getBuffer(),
+                                                         _savedKey.getSize(),
+                                                         _index.getOrdering(),
+                                                         _savedKey.getTypeBits());
+        if (_savedKey.getSize() == sizeWithoutRecordId) {
+            // Create a copy of _key with a RecordId. Because _key is used during cursor restore(),
+            // appending the RecordId would cause the cursor to be repositioned incorrectly.
+            KeyString::Builder keyWithRecordId(_savedKey);
+            keyWithRecordId.appendRecordId(_savedRecId);
+            keyWithRecordId.setTypeBits(_savedTypeBits);
+            return KeyStringEntry(keyWithRecordId.getValueCopy(), _savedRecId);
+        }
+
+        _savedKey.setTypeBits(_savedTypeBits);
+        return KeyStringEntry(_savedKey.getValueCopy(), _savedRecId);
+    }
+
     /**
      * Advances the cursor and determines if end reached.
      */
@@ -510,7 +555,7 @@ protected:
         const void* key = _stmt->getColBlob(0);
         const long long size = _stmt->getColBytes(0);
 
-        KeyString currKey(_index.getKeyStringVersion());
+        KeyString::Builder currKey(_index.getKeyStringVersion());
         currKey.resetFromBuffer(key, size);
 
         // The cursor has reached EOF if the current row passes the end position.
@@ -569,7 +614,7 @@ protected:
         const void* key = _stmt->getColBlob(0);
         const long long size = _stmt->getColBytes(0);
 
-        KeyString nearestKey(_index.getKeyStringVersion());
+        KeyString::Builder nearestKey(_index.getKeyStringVersion());
         nearestKey.resetFromBuffer(key, size);
 
         return nearestKey == _startPosition;
@@ -597,15 +642,15 @@ protected:
     bool _isForward;
     bool _isEOF = true;
 
-    KeyString _savedKey;
+    KeyString::Builder _savedKey;
     RecordId _savedRecId;
     KeyString::TypeBits _savedTypeBits;
 
     // The statement executed to fetch rows from SQLite.
     std::unique_ptr<SqliteStatement> _stmt;
 
-    KeyString _startPosition;
-    std::unique_ptr<KeyString> _endPosition;
+    KeyString::Builder _startPosition;
+    std::unique_ptr<KeyString::Builder> _endPosition;
 };
 
 /**
@@ -660,28 +705,26 @@ SortedDataBuilderInterface* MobileIndexStandard::getBulkBuilder(OperationContext
 
 std::unique_ptr<SortedDataInterface::Cursor> MobileIndexStandard::newCursor(OperationContext* opCtx,
                                                                             bool isForward) const {
-    return stdx::make_unique<CursorStandard>(*this, opCtx, isForward);
+    return std::make_unique<CursorStandard>(*this, opCtx, isForward);
 }
 
-StatusWith<SpecialFormatInserted> MobileIndexStandard::_insert(OperationContext* opCtx,
-                                                               const BSONObj& key,
-                                                               const RecordId& recId,
-                                                               bool dupsAllowed) {
+Status MobileIndexStandard::_insert(OperationContext* opCtx,
+                                    const KeyString::Value& keyString,
+                                    bool dupsAllowed) {
     invariant(dupsAllowed);
+    dassert(KeyString::decodeRecordIdAtEnd(keyString.getBuffer(), keyString.getSize()).isValid());
 
-    const KeyString keyStr(_keyStringVersion, key, _ordering, recId);
-    const KeyString::TypeBits value = keyStr.getTypeBits();
-    return doInsert(opCtx, keyStr, value);
+    const KeyString::TypeBits typeBits = keyString.getTypeBits();
+    return doInsert(opCtx, keyString.getBuffer(), keyString.getSize(), typeBits, typeBits);
 }
 
 void MobileIndexStandard::_unindex(OperationContext* opCtx,
-                                   const BSONObj& key,
-                                   const RecordId& recId,
+                                   const KeyString::Value& keyString,
                                    bool dupsAllowed) {
     invariant(dupsAllowed);
+    dassert(KeyString::decodeRecordIdAtEnd(keyString.getBuffer(), keyString.getSize()).isValid());
 
-    const KeyString keyStr(_keyStringVersion, key, _ordering, recId);
-    _doDelete(opCtx, keyStr);
+    _doDelete(opCtx, keyString.getBuffer(), keyString.getSize());
 }
 
 MobileIndexUnique::MobileIndexUnique(OperationContext* opCtx,
@@ -699,46 +742,53 @@ SortedDataBuilderInterface* MobileIndexUnique::getBulkBuilder(OperationContext* 
 
 std::unique_ptr<SortedDataInterface::Cursor> MobileIndexUnique::newCursor(OperationContext* opCtx,
                                                                           bool isForward) const {
-    return stdx::make_unique<CursorUnique>(*this, opCtx, isForward);
+    return std::make_unique<CursorUnique>(*this, opCtx, isForward);
 }
 
-StatusWith<SpecialFormatInserted> MobileIndexUnique::_insert(OperationContext* opCtx,
-                                                             const BSONObj& key,
-                                                             const RecordId& recId,
-                                                             bool dupsAllowed) {
+Status MobileIndexUnique::_insert(OperationContext* opCtx,
+                                  const KeyString::Value& keyString,
+                                  bool dupsAllowed) {
     // Replication is not supported so dups are not allowed.
     invariant(!dupsAllowed);
-    const KeyString keyStr(_keyStringVersion, key, _ordering);
 
-    KeyString value(_keyStringVersion, recId);
-    KeyString::TypeBits typeBits = keyStr.getTypeBits();
+    RecordId recId = KeyString::decodeRecordIdAtEnd(keyString.getBuffer(), keyString.getSize());
+    invariant(recId.isValid());
+
+    KeyString::Builder value(_keyStringVersion, recId);
+    KeyString::TypeBits typeBits = keyString.getTypeBits();
     if (!typeBits.isAllZeros()) {
         value.appendTypeBits(typeBits);
     }
+    auto sizeWithoutRecordId =
+        KeyString::sizeWithoutRecordIdAtEnd(keyString.getBuffer(), keyString.getSize());
 
-    return doInsert(opCtx, keyStr, value);
+    return doInsert(
+        opCtx, keyString.getBuffer(), sizeWithoutRecordId, keyString.getTypeBits(), value);
 }
 
 void MobileIndexUnique::_unindex(OperationContext* opCtx,
-                                 const BSONObj& key,
-                                 const RecordId& recId,
+                                 const KeyString::Value& keyString,
                                  bool dupsAllowed) {
     // Replication is not supported so dups are not allowed.
     invariant(!dupsAllowed);
-    const KeyString keyStr(_keyStringVersion, key, _ordering);
 
     // A partial index may attempt to delete a non-existent record id. If it is a partial index, it
     // must delete a row that matches both key and value.
+    auto sizeWithoutRecordId =
+        KeyString::sizeWithoutRecordIdAtEnd(keyString.getBuffer(), keyString.getSize());
     if (_isPartial) {
-        KeyString value(_keyStringVersion, recId);
-        KeyString::TypeBits typeBits = keyStr.getTypeBits();
+        RecordId recId = KeyString::decodeRecordIdAtEnd(keyString.getBuffer(), keyString.getSize());
+        invariant(recId.isValid());
+
+        KeyString::Builder value(_keyStringVersion, recId);
+        KeyString::TypeBits typeBits = keyString.getTypeBits();
         if (!typeBits.isAllZeros()) {
             value.appendTypeBits(typeBits);
         }
 
-        _doDelete(opCtx, keyStr, &value);
+        _doDelete(opCtx, keyString.getBuffer(), sizeWithoutRecordId, &value);
     } else {
-        _doDelete(opCtx, keyStr);
+        _doDelete(opCtx, keyString.getBuffer(), sizeWithoutRecordId);
     }
 }
 

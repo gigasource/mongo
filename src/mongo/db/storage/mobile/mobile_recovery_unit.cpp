@@ -50,7 +50,7 @@ namespace mongo {
 AtomicWord<long long> MobileRecoveryUnit::_nextID(0);
 
 MobileRecoveryUnit::MobileRecoveryUnit(MobileSessionPool* sessionPool)
-    : _inUnitOfWork(false), _active(false), _isReadOnly(true), _sessionPool(sessionPool) {
+    : _isReadOnly(true), _sessionPool(sessionPool) {
     // Increment the global instance count and assign this instance an id.
     _id = _nextID.addAndFetch(1);
 
@@ -58,77 +58,64 @@ MobileRecoveryUnit::MobileRecoveryUnit(MobileSessionPool* sessionPool)
 }
 
 MobileRecoveryUnit::~MobileRecoveryUnit() {
-    invariant(!_inUnitOfWork);
+    invariant(!_inUnitOfWork(), toString(getState()));
     _abort();
     RECOVERY_UNIT_TRACE() << "Destroyed.";
 }
 
 void MobileRecoveryUnit::_commit() {
-    if (_session && _active) {
+    if (_session && _isActive()) {
         _txnClose(true);
     }
-
-    for (auto& change : _changes) {
-        try {
-            change->commit(boost::none);
-        } catch (...) {
-            std::terminate();
-        }
-    }
-    _changes.clear();
+    _setState(State::kCommitting);
+    commitRegisteredChanges(boost::none);
+    _setState(State::kInactive);
 }
 
 void MobileRecoveryUnit::_abort() {
-    if (_session && _active) {
+    if (_session && _isActive()) {
         _txnClose(false);
     }
-    for (auto it = _changes.rbegin(); it != _changes.rend(); ++it) {
-        try {
-            (*it)->rollback();
-        } catch (...) {
-            std::terminate();
-        }
-    }
-    _changes.clear();
-    invariant(!_active);
+    _setState(State::kAborting);
+    abortRegisteredChanges();
+
+    invariant(!_isActive(), toString(getState()));
+    _setState(State::kInactive);
 }
 
 void MobileRecoveryUnit::beginUnitOfWork(OperationContext* opCtx) {
-    invariant(!_areWriteUnitOfWorksBanned);
-    invariant(!_inUnitOfWork);
+    invariant(!_inUnitOfWork(), toString(getState()));
 
     RECOVERY_UNIT_TRACE() << "Unit of work Active.";
 
-    if (_active) {
+    if (_isActive()) {
         // Confirm a write transaction is not running
         invariant(_isReadOnly);
 
         // Rollback read transaction running outside wuow
         _txnClose(false);
     }
+    _setState(State::kInactiveInUnitOfWork);
     _txnOpen(opCtx, false);
-    _inUnitOfWork = true;
 }
 
-void MobileRecoveryUnit::commitUnitOfWork() {
-    invariant(_inUnitOfWork);
+void MobileRecoveryUnit::doCommitUnitOfWork() {
+    invariant(_inUnitOfWork(), toString(getState()));
 
     RECOVERY_UNIT_TRACE() << "Unit of work commited, marked inactive.";
 
-    _inUnitOfWork = false;
     _commit();
 }
 
-void MobileRecoveryUnit::abortUnitOfWork() {
-    invariant(_inUnitOfWork);
+void MobileRecoveryUnit::doAbortUnitOfWork() {
+    invariant(_inUnitOfWork(), toString(getState()));
 
     RECOVERY_UNIT_TRACE() << "Unit of work aborted, marked inactive.";
 
-    _inUnitOfWork = false;
     _abort();
 }
 
-bool MobileRecoveryUnit::waitUntilDurable() {
+bool MobileRecoveryUnit::waitUntilDurable(OperationContext* opCtx) {
     // This is going to be slow as we're taking a global X lock and doing a full checkpoint. This
     // should not be needed to do on Android or iOS if we are on WAL and synchronous=NORMAL which
     // are our default settings. The system will make sure any non-flushed writes will not be lost
@@ -136,7 +123,6 @@ bool MobileRecoveryUnit::waitUntilDurable() {
     // not call this (by disabling writeConcern j:true) but allow it when this is used inside
     // mongod.
     if (_sessionPool->getOptions().durabilityLevel < 2) {
-        OperationContext* opCtx = Client::getCurrent()->getOperationContext();
         _ensureSession(opCtx);
         RECOVERY_UNIT_TRACE() << "waitUntilDurable called, attempting to perform a checkpoint";
         int framesInWAL = 0;
@@ -146,7 +132,7 @@ bool MobileRecoveryUnit::waitUntilDurable() {
             Lock::GlobalLock lk(opCtx, MODE_X);
             // Use FULL mode to guarantee durability
             ret = sqlite3_wal_checkpoint_v2(_session.get()->getSession(),
-                                            NULL,
+                                            nullptr,
                                             SQLITE_CHECKPOINT_FULL,
                                             &framesInWAL,
                                             &checkpointedFrames);
@@ -163,25 +149,20 @@ bool MobileRecoveryUnit::waitUntilDurable() {
     return true;
 }
 
-void MobileRecoveryUnit::abandonSnapshot() {
-    invariant(!_inUnitOfWork);
-    if (_active) {
+void MobileRecoveryUnit::doAbandonSnapshot() {
+    invariant(!_inUnitOfWork(), toString(getState()));
+    if (_isActive()) {
         // We can't be in a WriteUnitOfWork, so it is safe to rollback.
         _txnClose(false);
     }
-    _areWriteUnitOfWorksBanned = false;
-}
-
-void MobileRecoveryUnit::registerChange(Change* change) {
-    invariant(_inUnitOfWork);
-    _changes.push_back(std::unique_ptr<Change>{change});
+    _setState(State::kInactive);
 }
 
 MobileSession* MobileRecoveryUnit::getSession(OperationContext* opCtx, bool readOnly) {
     RECOVERY_UNIT_TRACE() << "getSession called with readOnly:" << (readOnly ? "TRUE" : "FALSE");
 
-    invariant(_inUnitOfWork || readOnly);
-    if (!_active) {
+    invariant(_inUnitOfWork() || readOnly);
+    if (!_isActive()) {
         _txnOpen(opCtx, readOnly);
     }
 
@@ -194,7 +175,7 @@ MobileSession* MobileRecoveryUnit::getSessionNoTxn(OperationContext* opCtx) {
 }
 
 void MobileRecoveryUnit::assertInActiveTxn() const {
-    fassert(37050, _active);
+    fassert(37050, _isActive());
 }
 
 void MobileRecoveryUnit::_ensureSession(OperationContext* opCtx) {
@@ -205,7 +186,7 @@ void MobileRecoveryUnit::_ensureSession(OperationContext* opCtx) {
 }
 
 void MobileRecoveryUnit::_txnOpen(OperationContext* opCtx, bool readOnly) {
-    invariant(!_active);
+    invariant(!_isActive(), toString(getState()));
     RECOVERY_UNIT_TRACE() << "_txnOpen called with readOnly:" << (readOnly ? "TRUE" : "FALSE");
     _ensureSession(opCtx);
 
@@ -237,11 +218,11 @@ void MobileRecoveryUnit::_txnOpen(OperationContext* opCtx, bool readOnly) {
     }
 
     _isReadOnly = readOnly;
-    _active = true;
+    _setState(_inUnitOfWork() ? State::kActive : State::kActiveNotInUnitOfWork);
 }
 
 void MobileRecoveryUnit::_txnClose(bool commit) {
-    invariant(_active);
+    invariant(_isActive(), toString(getState()));
     RECOVERY_UNIT_TRACE() << "_txnClose called with " << (commit ? "commit " : "rollback ");
 
     if (commit) {
@@ -250,7 +231,6 @@ void MobileRecoveryUnit::_txnClose(bool commit) {
         SqliteStatement::execQuery(_session.get(), "ROLLBACK");
     }
 
-    _active = false;
     _isReadOnly = true;  // I don't suppose we need this, but no harm in doing so
 }
 

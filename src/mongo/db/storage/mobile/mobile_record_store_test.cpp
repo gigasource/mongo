@@ -31,6 +31,7 @@
 
 #include <boost/filesystem.hpp>
 #include <boost/system/error_code.hpp>
+#include <memory>
 
 #include "mongo/base/init.h"
 #include "mongo/db/catalog/collection_options.h"
@@ -43,7 +44,6 @@
 #include "mongo/db/storage/mobile/mobile_sqlite_statement.h"
 #include "mongo/db/storage/mobile/mobile_util.h"
 #include "mongo/db/storage/record_store_test_harness.h"
-#include "mongo/stdx/memory.h"
 #include "mongo/unittest/temp_dir.h"
 #include "mongo/unittest/unittest.h"
 #include "mongo/util/options_parser/options_parser.h"
@@ -56,9 +56,9 @@ namespace {
 
 static int inc = 0;
 
-class MobileHarnessHelper final : public RecordStoreHarnessHelper {
+class MobileRecordStoreHarnessHelper final : public RecordStoreHarnessHelper {
 public:
-    MobileHarnessHelper() : _dbPath("mobile_record_store_harness") {
+    MobileRecordStoreHarnessHelper() : _dbPath("mobile_record_store_harness") {
         // TODO: Determine if this should be util function.
         boost::system::error_code err;
         boost::filesystem::path dir(_dbPath.path());
@@ -112,7 +112,7 @@ public:
     std::unique_ptr<RecordStore> newNonCappedRecordStore(const std::string& ns) override {
         ServiceContext::UniqueOperationContext opCtx(this->newOperationContext());
         MobileRecordStore::create(opCtx.get(), ns);
-        return stdx::make_unique<MobileRecordStore>(
+        return std::make_unique<MobileRecordStore>(
             opCtx.get(), ns, _fullPath, ns, CollectionOptions());
     }
 
@@ -131,11 +131,11 @@ public:
         options.capped = true;
         options.cappedSize = cappedMaxSize;
         options.cappedMaxDocs = cappedMaxDocs;
-        return stdx::make_unique<MobileRecordStore>(opCtx.get(), ns, _fullPath, ns, options);
+        return std::make_unique<MobileRecordStore>(opCtx.get(), ns, _fullPath, ns, options);
     }
 
     std::unique_ptr<RecoveryUnit> newRecoveryUnit() final {
-        return stdx::make_unique<MobileRecoveryUnit>(_sessionPool.get());
+        return std::make_unique<MobileRecoveryUnit>(_sessionPool.get());
     }
 
     bool supportsDocLocking() final {
@@ -148,12 +148,12 @@ private:
     std::unique_ptr<MobileSessionPool> _sessionPool;
 };
 
-std::unique_ptr<HarnessHelper> makeHarnessHelper() {
-    return stdx::make_unique<MobileHarnessHelper>();
+std::unique_ptr<RecordStoreHarnessHelper> makeMobileRecordStoreHarnessHelper() {
+    return std::make_unique<MobileRecordStoreHarnessHelper>();
 }
 
 MONGO_INITIALIZER(RegisterHarnessFactory)(InitializerContext* const) {
-    mongo::registerHarnessHelperFactory(makeHarnessHelper);
+    mongo::registerRecordStoreHarnessHelperFactory(makeMobileRecordStoreHarnessHelper);
     return Status::OK();
 }
 }  // namespace

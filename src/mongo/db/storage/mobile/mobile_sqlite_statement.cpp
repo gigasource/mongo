@@ -42,10 +42,9 @@
 #include "mongo/util/scopeguard.h"
 
 #define SQLITE_STMT_TRACE() LOG(MOBILE_TRACE_LEVEL) << "MobileSE: SQLite Stmt ID:" << _id << " "
-#define SQLITE_STMT_TRACE_ENABLED()                 \
-    (::mongo::logger::globalLogDomain()->shouldLog( \
-        MongoLogDefaultComponent_component,         \
-        ::mongo::LogstreamBuilder::severityCast(MOBILE_TRACE_LEVEL)))
+#define SQLITE_STMT_TRACE_ENABLED()                \
+    (shouldLog(MongoLogDefaultComponent_component, \
+               ::mongo::LogstreamBuilder::severityCast(MOBILE_TRACE_LEVEL)))
 
 namespace mongo {
 
@@ -59,14 +58,14 @@ void SqliteStatement::finalize() {
 
     int status = sqlite3_finalize(_stmt);
     fassert(37053, status == _exceptionStatus);
-    _stmt = NULL;
+    _stmt = nullptr;
 }
 
 void SqliteStatement::prepare(const MobileSession& session) {
     SQLITE_STMT_TRACE() << "Preparing: " << _sqlQuery.data();
 
-    int status =
-        sqlite3_prepare_v2(session.getSession(), _sqlQuery.data(), _sqlQuery.size(), &_stmt, NULL);
+    int status = sqlite3_prepare_v2(
+        session.getSession(), _sqlQuery.data(), _sqlQuery.size(), &_stmt, nullptr);
     if (status == SQLITE_BUSY) {
         SQLITE_STMT_TRACE() << "Throwing writeConflictException, "
                             << "SQLITE_BUSY while preparing: " << _sqlQuery.data();
@@ -150,8 +149,8 @@ const char* SqliteStatement::getColText(int colIndex) {
 void SqliteStatement::_execQuery(sqlite3* session, const char* query) {
     LOG(MOBILE_TRACE_LEVEL) << "MobileSE: SQLite sqlite3_exec: " << query;
 
-    char* errMsg = NULL;
-    int status = sqlite3_exec(session, query, NULL, NULL, &errMsg);
+    char* errMsg = nullptr;
+    int status = sqlite3_exec(session, query, nullptr, nullptr, &errMsg);
 
     if (status == SQLITE_BUSY || status == SQLITE_LOCKED) {
         LOG(MOBILE_TRACE_LEVEL) << "MobileSE: " << (status == SQLITE_BUSY ? "Busy" : "Locked")

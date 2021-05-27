@@ -33,6 +33,7 @@
 
 #include "mongo/db/storage/mobile/mobile_record_store.h"
 
+#include <memory>
 #include <sqlite3.h>
 
 #include "mongo/base/static_assert.h"
@@ -46,7 +47,6 @@
 #include "mongo/db/storage/mobile/mobile_util.h"
 #include "mongo/db/storage/oplog_hack.h"
 #include "mongo/db/storage/recovery_unit.h"
-#include "mongo/stdx/memory.h"
 #include "mongo/util/assert_util.h"
 #include "mongo/util/log.h"
 #include "mongo/util/str.h"
@@ -63,16 +63,16 @@ public:
         : _opCtx(opCtx), _forward(forward) {
 
         MobileSession* session = MobileRecoveryUnit::get(_opCtx)->getSession(_opCtx);
-        _stmt = stdx::make_unique<SqliteStatement>(*session,
-                                                   "SELECT rec_id, data from \"",
-                                                   ident,
-                                                   "\" ",
-                                                   "WHERE rec_id ",
-                                                   (forward ? ">" : "<"),
-                                                   " ? ",
-                                                   "ORDER BY rec_id ",
-                                                   (forward ? "ASC" : "DESC"),
-                                                   ";");
+        _stmt = std::make_unique<SqliteStatement>(*session,
+                                                  "SELECT rec_id, data from \"",
+                                                  ident,
+                                                  "\" ",
+                                                  "WHERE rec_id ",
+                                                  (forward ? ">" : "<"),
+                                                  " ? ",
+                                                  "ORDER BY rec_id ",
+                                                  (forward ? "ASC" : "DESC"),
+                                                  ";");
 
         _startIdNum = (forward ? RecordId::min().repr() : RecordId::max().repr());
         _savedId = RecordId(_startIdNum);
@@ -233,7 +233,7 @@ void MobileRecordStore::_initDataSizeIfNeeded_inlock(OperationContext* opCtx) co
 }
 
 long long MobileRecordStore::dataSize(OperationContext* opCtx) const {
-    stdx::lock_guard<stdx::mutex> lock(_dataSizeMutex);
+    stdx::lock_guard<Latch> lock(_dataSizeMutex);
     _initDataSizeIfNeeded_inlock(opCtx);
     return _dataSize;
 }
@@ -255,7 +255,7 @@ void MobileRecordStore::_initNumRecsIfNeeded_inlock(OperationContext* opCtx) con
 }
 
 long long MobileRecordStore::numRecords(OperationContext* opCtx) const {
-    stdx::lock_guard<stdx::mutex> lock(_numRecsMutex);
+    stdx::lock_guard<Latch> lock(_numRecsMutex);
     _initNumRecsIfNeeded_inlock(opCtx);
     return _numRecs;
 }
@@ -325,30 +325,6 @@ Status MobileRecordStore::insertRecords(OperationContext* opCtx,
     return Status::OK();
 }
 
-Status MobileRecordStore::insertRecordsWithDocWriter(OperationContext* opCtx,
-                                                     const DocWriter* const* docs,
-                                                     const Timestamp* timestamps,
-                                                     size_t nDocs,
-                                                     RecordId* idsOut) {
-    // Calculates the total size of the data buffer.
-    size_t totalSize = 0;
-    for (size_t i = 0; i < nDocs; i++) {
-        totalSize += docs[i]->documentSize();
-    }
-
-    std::unique_ptr<char[]> buffer(new char[totalSize]);
-    char* pos = buffer.get();
-    for (size_t i = 0; i < nDocs; i++) {
-        docs[i]->writeDocument(pos);
-        size_t docLen = docs[i]->documentSize();
-        StatusWith<RecordId> res = insertRecord(opCtx, pos, docLen, timestamps[i]);
-        idsOut[i] = res.getValue();
-        pos += docLen;
-    }
-
-    return Status::OK();
-}
-
 Status MobileRecordStore::updateRecord(OperationContext* opCtx,
                                        const RecordId& recId,
                                        const char* data,
@@ -387,7 +363,7 @@ StatusWith<RecordData> MobileRecordStore::updateWithDamages(
 
 std::unique_ptr<SeekableRecordCursor> MobileRecordStore::getCursor(OperationContext* opCtx,
                                                                    bool forward) const {
-    return stdx::make_unique<Cursor>(opCtx, *this, _path, _ident, forward);
+    return std::make_unique<Cursor>(opCtx, *this, _path, _ident, forward);
 }
 
 /**
@@ -408,21 +384,10 @@ Status MobileRecordStore::truncate(OperationContext* opCtx) {
     return Status::OK();
 }
 
-/**
- * Note: on full validation, this validates the entire database file, not just the table used by
- * this record store.
- */
 void MobileRecordStore::validate(OperationContext* opCtx,
-                                 ValidateCmdLevel level,
                                  ValidateResults* results,
                                  BSONObjBuilder* output) {
-    if (level == kValidateFull) {
-        embedded::doValidate(opCtx, results);
-    }
-}
-
-Status MobileRecordStore::touch(OperationContext* opCtx, BSONObjBuilder* output) const {
-    return Status(ErrorCodes::CommandNotSupported, "this storage engine does not support touch");
+    embedded::doValidate(opCtx, results);
 }
 
 /**
@@ -451,7 +416,7 @@ public:
     void commit(boost::optional<Timestamp>) override {}
 
     void rollback() override {
-        stdx::lock_guard<stdx::mutex> lock(_rs->_numRecsMutex);
+        stdx::lock_guard<Latch> lock(_rs->_numRecsMutex);
         _rs->_numRecs -= _diff;
     }
 
@@ -461,8 +426,8 @@ private:
 };
 
 void MobileRecordStore::_changeNumRecs(OperationContext* opCtx, int64_t diff) {
-    stdx::lock_guard<stdx::mutex> lock(_numRecsMutex);
-    opCtx->recoveryUnit()->registerChange(new NumRecsChange(this, diff));
+    stdx::lock_guard<Latch> lock(_numRecsMutex);
+    opCtx->recoveryUnit()->registerChange(std::make_unique<NumRecsChange>(this, diff));
     _initNumRecsIfNeeded_inlock(opCtx);
     _numRecs += diff;
 }
@@ -472,7 +437,7 @@ bool MobileRecordStore::_resetNumRecsIfNeeded(OperationContext* opCtx, int64_t n
     int64_t currNumRecs = numRecords(opCtx);
     if (currNumRecs != newNumRecs) {
         wasReset = true;
-        stdx::lock_guard<stdx::mutex> lock(_numRecsMutex);
+        stdx::lock_guard<Latch> lock(_numRecsMutex);
         _numRecs = newNumRecs;
     }
     return wasReset;
@@ -488,7 +453,7 @@ public:
     void commit(boost::optional<Timestamp>) override {}
 
     void rollback() override {
-        stdx::lock_guard<stdx::mutex> lock(_rs->_dataSizeMutex);
+        stdx::lock_guard<Latch> lock(_rs->_dataSizeMutex);
         _rs->_dataSize -= _diff;
     }
 
@@ -498,8 +463,8 @@ private:
 };
 
 void MobileRecordStore::_changeDataSize(OperationContext* opCtx, int64_t diff) {
-    stdx::lock_guard<stdx::mutex> lock(_dataSizeMutex);
-    opCtx->recoveryUnit()->registerChange(new DataSizeChange(this, diff));
+    stdx::lock_guard<Latch> lock(_dataSizeMutex);
+    opCtx->recoveryUnit()->registerChange(std::make_unique<DataSizeChange>(this, diff));
     _initDataSizeIfNeeded_inlock(opCtx);
     _dataSize += diff;
 }
@@ -510,7 +475,7 @@ bool MobileRecordStore::_resetDataSizeIfNeeded(OperationContext* opCtx, int64_t 
 
     if (currDataSize != _dataSize) {
         wasReset = true;
-        stdx::lock_guard<stdx::mutex> lock(_dataSizeMutex);
+        stdx::lock_guard<Latch> lock(_dataSizeMutex);
         _dataSize = newDataSize;
     }
     return wasReset;
