@@ -90,6 +90,15 @@ if get_option('install-mode') == 'hygienic':
 yamlEnv = env.Clone()
 yamlEnv.InjectThirdParty(libraries=['yaml'])
 
+env.SConscript(
+    dirs=[
+        'mongo_addon'
+    ],
+    exports={
+        'env': yamlEnv
+    }
+)
+
 if get_option('link-model') != 'dynamic-sdk':
     mongoEmbeddedTest = yamlEnv.Program(
         target='mongo_embedded_test',
