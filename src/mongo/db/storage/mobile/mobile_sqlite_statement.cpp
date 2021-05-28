@@ -92,24 +92,24 @@ SqliteStatement::~SqliteStatement() {
 void SqliteStatement::bindInt(int paramIndex, int64_t intValue) {
     // SQLite bind methods begin paramater indexes at 1 rather than 0.
     int status = sqlite3_bind_int64(_stmt, paramIndex + 1, intValue);
-    embedded::checkStatus(status, SQLITE_OK, "sqlite3_bind");
+    checkStatus(status, SQLITE_OK, "sqlite3_bind");
 }
 
 void SqliteStatement::bindBlob(int paramIndex, const void* data, int len) {
     // SQLite bind methods begin paramater indexes at 1 rather than 0.
     int status = sqlite3_bind_blob(_stmt, paramIndex + 1, data, len, SQLITE_STATIC);
-    embedded::checkStatus(status, SQLITE_OK, "sqlite3_bind");
+    checkStatus(status, SQLITE_OK, "sqlite3_bind");
 }
 
 void SqliteStatement::bindText(int paramIndex, const char* data, int len) {
     // SQLite bind methods begin paramater indexes at 1 rather than 0.
     int status = sqlite3_bind_text(_stmt, paramIndex + 1, data, len, SQLITE_STATIC);
-    embedded::checkStatus(status, SQLITE_OK, "sqlite3_bind");
+    checkStatus(status, SQLITE_OK, "sqlite3_bind");
 }
 
 void SqliteStatement::clearBindings() {
     int status = sqlite3_clear_bindings(_stmt);
-    embedded::checkStatus(status, SQLITE_OK, "sqlite3_clear_bindings");
+    checkStatus(status, SQLITE_OK, "sqlite3_clear_bindings");
 }
 
 int SqliteStatement::step(int desiredStatus) {
@@ -118,12 +118,12 @@ int SqliteStatement::step(int desiredStatus) {
     // A non-negative desiredStatus indicates that checkStatus should assert that the returned
     // status is equivalent to the desired status.
     if (desiredStatus >= 0) {
-        embedded::checkStatus(status, desiredStatus, "sqlite3_step");
+        checkStatus(status, desiredStatus, "sqlite3_step");
     }
 
     if (SQLITE_STMT_TRACE_ENABLED()) {
         char* full_stmt = sqlite3_expanded_sql(_stmt);
-        SQLITE_STMT_TRACE() << embedded::sqliteStatusToStr(status)
+        SQLITE_STMT_TRACE() << sqliteStatusToStr(status)
                             << " - on stepping: " << full_stmt;
         sqlite3_free(full_stmt);
     }
@@ -160,7 +160,7 @@ void SqliteStatement::_execQuery(sqlite3* session, const char* query) {
     }
 
     // The only return value from sqlite3_exec in a success case is SQLITE_OK.
-    embedded::checkStatus(status, SQLITE_OK, "sqlite3_exec", errMsg);
+    checkStatus(status, SQLITE_OK, "sqlite3_exec", errMsg);
 
     // When the error message is not NULL, it is allocated through sqlite3_malloc and must be freed
     // before exiting the method. If the error message is NULL, sqlite3_free is a no-op.
@@ -169,7 +169,7 @@ void SqliteStatement::_execQuery(sqlite3* session, const char* query) {
 
 void SqliteStatement::reset() {
     int status = sqlite3_reset(_stmt);
-    embedded::checkStatus(status, SQLITE_OK, "sqlite3_reset");
+    checkStatus(status, SQLITE_OK, "sqlite3_reset");
 }
 
 }  // namespace mongo

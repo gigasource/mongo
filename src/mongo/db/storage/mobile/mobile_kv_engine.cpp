@@ -187,8 +187,8 @@ void MobileKVEngine::maybeVacuum(Client* client, Date_t deadline) {
     constexpr int kPageSize = 4096;  // SQLite default
     LOG(MOBILE_LOG_LEVEL_LOW) << "MobileSE: Evaluating if we need to vacuum. page_count = "
                               << pageCount << ", freelist_count = " << freelistCount;
-    if ((pageCount > 0 && (float)freelistCount / pageCount >= _options.vacuumFreePageRatio) ||
-        (freelistCount * kPageSize >= _options.vacuumFreeSizeMB * 1024 * 1024)) {
+    if ((pageCount > 0 && (float)freelistCount / pageCount >= 0.25) ||
+        (freelistCount * kPageSize >= 50 * 1024 * 1024)) {
         LOG(MOBILE_LOG_LEVEL_LOW) << "MobileSE: Performing incremental vacuum";
         // Data will we moved on the file system, take an exclusive lock
         Lock::GlobalLock lk(opCtx, MODE_X, deadline, Lock::InterruptBehavior::kThrow);

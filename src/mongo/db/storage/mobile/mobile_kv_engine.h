@@ -36,6 +36,7 @@
 #include "mongo/db/storage/kv/kv_engine.h"
 #include "mongo/db/storage/mobile/mobile_session_pool.h"
 #include "mongo/stdx/mutex.h"
+#include "mongo/util/periodic_runner.h"
 #include "mongo/util/string_map.h"
 
 namespace mongo {
@@ -136,5 +137,6 @@ private:
     JournalListener* _journalListener = &NoOpJournalListener::instance;
 
     std::string _path;
+    std::unique_ptr<PeriodicRunner::PeriodicJobHandle> _vacuumJob;
 };
 }  // namespace mongo
