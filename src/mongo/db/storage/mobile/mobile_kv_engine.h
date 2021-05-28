@@ -128,6 +128,8 @@ public:
     }
 
 private:
+    void maybeVacuum(Client* client, Date_t deadline);
+
     mutable stdx::mutex _mutex;
     void _initDBPath(const std::string& path);
 
