@@ -1,3 +1,4 @@
+
 /**
  *    Copyright (C) 2018-present MongoDB, Inc.
  *
@@ -42,20 +43,24 @@
 #include "mongo/util/scopeguard.h"
 
 #define SQLITE_STMT_TRACE() LOG(MOBILE_TRACE_LEVEL) << "MobileSE: SQLite Stmt ID:" << _id << " "
-#define SQLITE_STMT_TRACE_ENABLED()                 \
-    (::mongo::logger::globalLogDomain()->shouldLog( \
-        MongoLogDefaultComponent_component,         \
-        ::mongo::LogstreamBuilder::severityCast(MOBILE_TRACE_LEVEL)))
 
 namespace mongo {
 
-AtomicWord<long long> SqliteStatement::_nextID(0);
+AtomicInt64 SqliteStatement::_nextID(0);
+
+SqliteStatement::SqliteStatement(const MobileSession& session, const std::string& sqlQuery) {
+    // Increment the global instance count and assign this instance an id.
+    _id = _nextID.addAndFetch(1);
+    _sqlQuery = sqlQuery;
+
+    prepare(session);
+}
 
 void SqliteStatement::finalize() {
     if (!_stmt) {
         return;
     }
-    SQLITE_STMT_TRACE() << "Finalize: " << _sqlQuery.data();
+    SQLITE_STMT_TRACE() << "Finalize: " << _sqlQuery;
 
     int status = sqlite3_finalize(_stmt);
     fassert(37053, status == _exceptionStatus);
@@ -63,16 +68,16 @@ void SqliteStatement::finalize() {
 }
 
 void SqliteStatement::prepare(const MobileSession& session) {
-    SQLITE_STMT_TRACE() << "Preparing: " << _sqlQuery.data();
+    SQLITE_STMT_TRACE() << "Preparing: " << _sqlQuery;
 
-    int status =
-        sqlite3_prepare_v2(session.getSession(), _sqlQuery.data(), _sqlQuery.size(), &_stmt, NULL);
+    int status = sqlite3_prepare_v2(
+        session.getSession(), _sqlQuery.c_str(), _sqlQuery.length() + 1, &_stmt, NULL);
     if (status == SQLITE_BUSY) {
         SQLITE_STMT_TRACE() << "Throwing writeConflictException, "
-                            << "SQLITE_BUSY while preparing: " << _sqlQuery.data();
+                            << "SQLITE_BUSY while preparing: " << _sqlQuery;
         throw WriteConflictException();
     } else if (status != SQLITE_OK) {
-        SQLITE_STMT_TRACE() << "Error while preparing: " << _sqlQuery.data();
+        SQLITE_STMT_TRACE() << "Error while preparing: " << _sqlQuery;
         std::string errMsg = "sqlite3_prepare_v2 failed: ";
         errMsg += sqlite3_errstr(status);
         uasserted(ErrorCodes::UnknownError, errMsg);
@@ -81,12 +86,6 @@ void SqliteStatement::prepare(const MobileSession& session) {
 
 SqliteStatement::~SqliteStatement() {
     finalize();
-
-    static_assert(
-        sizeof(SqliteStatement) ==
-            sizeof(std::aligned_storage_t<sizeof(SqliteStatement), alignof(SqliteStatement)>),
-        "expected size to be exactly its aligned storage size to not waste memory, "
-        "adjust kMaxFixedSize to make this true");
 }
 
 void SqliteStatement::bindInt(int paramIndex, int64_t intValue) {
@@ -121,12 +120,9 @@ int SqliteStatement::step(int desiredStatus) {
         checkStatus(status, desiredStatus, "sqlite3_step");
     }
 
-    if (SQLITE_STMT_TRACE_ENABLED()) {
-        char* full_stmt = sqlite3_expanded_sql(_stmt);
-        SQLITE_STMT_TRACE() << sqliteStatusToStr(status)
-                            << " - on stepping: " << full_stmt;
-        sqlite3_free(full_stmt);
-    }
+    char* full_stmt = sqlite3_expanded_sql(_stmt);
+    SQLITE_STMT_TRACE() << sqliteStatusToStr(status) << " - on stepping: " << full_stmt;
+    sqlite3_free(full_stmt);
 
     return status;
 }
@@ -143,15 +139,15 @@ int64_t SqliteStatement::getColBytes(int colIndex) {
     return sqlite3_column_bytes(_stmt, colIndex);
 }
 
-const char* SqliteStatement::getColText(int colIndex) {
-    return reinterpret_cast<const char*>(sqlite3_column_text(_stmt, colIndex));
+const void* SqliteStatement::getColText(int colIndex) {
+    return sqlite3_column_text(_stmt, colIndex);
 }
 
-void SqliteStatement::_execQuery(sqlite3* session, const char* query) {
+void SqliteStatement::execQuery(MobileSession* session, const std::string& query) {
     LOG(MOBILE_TRACE_LEVEL) << "MobileSE: SQLite sqlite3_exec: " << query;
 
     char* errMsg = NULL;
-    int status = sqlite3_exec(session, query, NULL, NULL, &errMsg);
+    int status = sqlite3_exec(session->getSession(), query.c_str(), NULL, NULL, &errMsg);
 
     if (status == SQLITE_BUSY || status == SQLITE_LOCKED) {
         LOG(MOBILE_TRACE_LEVEL) << "MobileSE: " << (status == SQLITE_BUSY ? "Busy" : "Locked")

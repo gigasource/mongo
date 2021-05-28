@@ -56,7 +56,9 @@
 namespace mongo {
 namespace {
 int64_t queryPragmaInt(const MobileSession& session, StringData pragma) {
-    SqliteStatement stmt(session, "PRAGMA ", pragma, ";");
+    str::stream query;
+    query << "PRAGMA " << pragma << ";";
+    SqliteStatement stmt(session, query);
     stmt.step(SQLITE_ROW);
     return stmt.getColInt(0);
 }
