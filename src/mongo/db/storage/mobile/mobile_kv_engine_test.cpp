@@ -41,7 +41,7 @@ namespace {
 class MobileKVHarnessHelper : public KVHarnessHelper {
 public:
     MobileKVHarnessHelper() : _dbPath("mobile_kv_engine_harness") {
-        _engine = stdx::make_unique<MobileKVEngine>(_dbPath.path());
+        _engine = stdx::make_unique<MobileKVEngine>(_dbPath.path(), false, nullptr);
     }
 
     virtual KVEngine* restartEngine() {

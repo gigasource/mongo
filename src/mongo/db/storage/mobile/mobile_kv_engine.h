@@ -44,7 +44,7 @@ class JournalListener;
 
 class MobileKVEngine : public KVEngine {
 public:
-    MobileKVEngine(const std::string& path);
+    MobileKVEngine(const std::string& path, const bool useVacuum, ServiceContext* serviceContext);
 
     RecoveryUnit* newRecoveryUnit() override;
 

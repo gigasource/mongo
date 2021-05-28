@@ -38,6 +38,8 @@
 #include <memory>
 #include <vector>
 
+#include "mongo/db/concurrency/d_concurrency.h"
+#include "mongo/db/concurrency/lock_state.h"
 #include "mongo/db/concurrency/write_conflict_exception.h"
 #include "mongo/db/index/index_descriptor.h"
 #include "mongo/db/storage/mobile/mobile_index.h"
@@ -52,11 +54,17 @@
 #include "mongo/util/scopeguard.h"
 
 namespace mongo {
+namespace {
+int64_t queryPragmaInt(const MobileSession& session, StringData pragma) {
+    SqliteStatement stmt(session, "PRAGMA ", pragma, ";");
+    stmt.step(SQLITE_ROW);
+    return stmt.getColInt(0);
+}
 
 class MobileSession;
 class SqliteStatement;
 
-MobileKVEngine::MobileKVEngine(const std::string& path) {
+MobileKVEngine::MobileKVEngine(const std::string& path, const bool useVacuum, ServiceContext* serviceContext) {
     _initDBPath(path);
 
     // Initialize the database to be in WAL mode.
@@ -137,6 +145,57 @@ MobileKVEngine::MobileKVEngine(const std::string& path) {
     }
 
     _sessionPool.reset(new MobileSessionPool(_path));
+
+    if (useVacuum) {
+        _vacuumJob = serviceContext->getPeriodicRunner()->makeJob(
+            PeriodicRunner::PeriodicJob("SQLiteVacuumJob",
+                                        [this](Client* client) {
+                                            if (!client->getServiceContext()->getStorageEngine())
+                                                return;
+                                            maybeVacuum(client, Date_t::max());
+                                        },
+                                        Minutes(options.vacuumCheckIntervalMinutes)));
+        _vacuumJob->start();
+    }
+}
+
+void MobileKVEngine::maybeVacuum(Client* client, Date_t deadline) {
+    ServiceContext::UniqueOperationContext opCtxUPtr;
+    OperationContext* opCtx = client->getOperationContext();
+    if (!opCtx) {
+        opCtxUPtr = client->makeOperationContext();
+        opCtx = opCtxUPtr.get();
+    }
+
+    std::unique_ptr<MobileSession> session;
+    int64_t pageCount;
+    int64_t freelistCount;
+    {
+        // There may be other threads doing write operations that has locked the database in
+        // exclusive mode. Grab an S lock here to ensure that isn't the case while we get the
+        // session and query the pragmas.
+        Lock::GlobalLock lk(opCtx, MODE_S, deadline, Lock::InterruptBehavior::kThrow);
+        if (!lk.isLocked())
+            return;
+
+        session = _sessionPool->getSession(opCtx);
+        pageCount = queryPragmaInt(*session, "page_count"_sd);
+        freelistCount = queryPragmaInt(*session, "freelist_count"_sd);
+    }
+
+    constexpr int kPageSize = 4096;  // SQLite default
+    LOG(MOBILE_LOG_LEVEL_LOW) << "MobileSE: Evaluating if we need to vacuum. page_count = "
+                              << pageCount << ", freelist_count = " << freelistCount;
+    if ((pageCount > 0 && (float)freelistCount / pageCount >= _options.vacuumFreePageRatio) ||
+        (freelistCount * kPageSize >= _options.vacuumFreeSizeMB * 1024 * 1024)) {
+        LOG(MOBILE_LOG_LEVEL_LOW) << "MobileSE: Performing incremental vacuum";
+        // Data will we moved on the file system, take an exclusive lock
+        Lock::GlobalLock lk(opCtx, MODE_X, deadline, Lock::InterruptBehavior::kThrow);
+        if (!lk.isLocked())
+            return;
+
+        SqliteStatement::execQuery(session.get(), "PRAGMA incremental_vacuum;");
+    }
 }
 
 void MobileKVEngine::_initDBPath(const std::string& path) {

@@ -54,7 +54,7 @@ public:
         options.directoryPerDB = params.directoryperdb;
         options.forRepair = params.repair;
 
-        MobileKVEngine* kvEngine = new MobileKVEngine(params.dbpath);
+        MobileKVEngine* kvEngine = new MobileKVEngine(params.dbpath, true, getGlobalServiceContext());
         return new KVStorageEngine(kvEngine, options);
     }
 
