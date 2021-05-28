@@ -60,6 +60,7 @@ int64_t queryPragmaInt(const MobileSession& session, StringData pragma) {
     stmt.step(SQLITE_ROW);
     return stmt.getColInt(0);
 }
+}  // namespace
 
 class MobileSession;
 class SqliteStatement;
