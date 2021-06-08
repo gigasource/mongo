@@ -218,6 +218,12 @@ ServiceContext* initialize(const char* yaml_config) {
 
     DEV log(LogComponent::kControl) << "DEBUG build (which is slower)" << endl;
 
+    // The periodic runner is required by the storage engine to be running beforehand.
+    auto periodicRunner = std::make_unique<PeriodicRunnerEmbedded>(
+        serviceContext, serviceContext->getPreciseClockSource());
+    periodicRunner->startup();
+    serviceContext->setPeriodicRunner(std::move(periodicRunner));
+
     initializeStorageEngine(serviceContext, StorageEngineInitFlags::kAllowNoLockFile);
 
     // Warn if we detect configurations for multiple registered storage engines in the same
@@ -310,11 +316,6 @@ ServiceContext* initialize(const char* yaml_config) {
     if (!storageGlobalParams.readOnly) {
         restartInProgressIndexesFromLastShutdown(startupOpCtx.get());
     }
-
-    auto periodicRunner = std::make_unique<PeriodicRunnerEmbedded>(
-        serviceContext, serviceContext->getPreciseClockSource());
-    periodicRunner->startup();
-    serviceContext->setPeriodicRunner(std::move(periodicRunner));
 
     // Set up the logical session cache
     auto sessionCache = makeLogicalSessionCacheEmbedded();
