@@ -333,6 +333,12 @@ ExitCode _initAndListen(int listenPort) {
         }
         serviceContext->setTransportLayer(std::move(tl));
     }
+
+    // Set up the periodic runner for background job execution. This is required to be running
+    // before the storage engine is initialized.
+    auto runner = makePeriodicRunner(serviceContext);
+    runner->startup();
+    serviceContext->setPeriodicRunner(std::move(runner));
     initializeStorageEngine(serviceContext, StorageEngineInitFlags::kNone);
 
 #ifdef MONGO_CONFIG_WIREDTIGER_ENABLED
@@ -606,11 +612,6 @@ ExitCode _initAndListen(int listenPort) {
     startClientCursorMonitor();
 
     PeriodicTask::startRunningPeriodicTasks();
-
-    // Set up the periodic runner for background job execution
-    auto runner = makePeriodicRunner(serviceContext);
-    runner->startup();
-    serviceContext->setPeriodicRunner(std::move(runner));
 
     SessionKiller::set(serviceContext,
                        std::make_shared<SessionKiller>(serviceContext, killSessionsLocal));
