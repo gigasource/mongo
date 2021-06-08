@@ -182,7 +182,7 @@ void doValidate(OperationContext* opCtx, ValidateResults* results) {
     }
 }
 
-void configureSession(sqlite3* session) {
+void configureSession(const MobileSession& session) {
     auto executePragma = [session](auto pragma, auto value) {
         str::stream query;
         query << "PRAGMA " << pragma << " = " << value << ";";

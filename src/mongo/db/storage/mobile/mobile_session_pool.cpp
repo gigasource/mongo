@@ -121,9 +121,10 @@ std::unique_ptr<MobileSession> MobileSessionPool::getSession(OperationContext* o
         sqlite3* session;
         int status = sqlite3_open(_path.c_str(), &session);
         checkStatus(status, SQLITE_OK, "sqlite3_open");
-        configureSession(session);
         _curPoolSize++;
-        return stdx::make_unique<MobileSession>(session, this);
+        std::unique_ptr<MobileSession> mSession = stdx::make_unique<MobileSession>(session, this);
+        configureSession(*mSession);
+        return mSession
     }
 
     // There are no open sessions available and the maxPoolSize has been reached.
