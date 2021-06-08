@@ -182,11 +182,11 @@ void doValidate(OperationContext* opCtx, ValidateResults* results) {
     }
 }
 
-void configureSession(std::unique_ptr<MobileSession> session) {
+void configureSession(MobileSession* session) {
     auto executePragma = [session](auto pragma, auto value) {
         str::stream query;
         query << "PRAGMA " << pragma << " = " << value << ";";
-        SqliteStatement::execQuery(session.get(), query);
+        SqliteStatement::execQuery(session, query);
         LOG(MOBILE_LOG_LEVEL_LOW) << "MobileSE session configuration: " << pragma << " = " << value;
     };
     // We don't manually use VACUUM so set incremental(2) mode to reclaim space

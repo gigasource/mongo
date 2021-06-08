@@ -123,7 +123,7 @@ std::unique_ptr<MobileSession> MobileSessionPool::getSession(OperationContext* o
         checkStatus(status, SQLITE_OK, "sqlite3_open");
         _curPoolSize++;
         std::unique_ptr<MobileSession> mSession = stdx::make_unique<MobileSession>(session, this);
-        configureSession(mSession);
+        configureSession(mSession.get());
         return mSession;
     }
 

@@ -65,6 +65,6 @@ void validateLogAndAppendError(ValidateResults* results, const std::string& errM
  */
 void doValidate(OperationContext* opCtx, ValidateResults* results);
 
-void configureSession(const MobileSession& session);
+void configureSession(MobileSession* session);
 
 }  // namespace mongo
